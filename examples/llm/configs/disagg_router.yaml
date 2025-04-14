@@ -13,14 +13,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 Common:
-  model: deepseek-ai/DeepSeek-R1-Distill-Llama-8B
+  model: Nitral-AI/Captain-Eris_Violet-V0.420-12B
   block-size: 64
   max-model-len: 16384
   router: kv
   kv-transfer-config: '{"kv_connector":"DynamoNixlConnector"}'
 
 Frontend:
-  served_model_name: deepseek-ai/DeepSeek-R1-Distill-Llama-8B
+  served_model_name: Nitral-AI/Captain-Eris_Violet-V0.420-12B
   endpoint: dynamo.Processor.chat/completions
   port: 8000
 
@@ -40,7 +40,7 @@ VllmWorker:
   tensor-parallel-size: 1
   enable-prefix-caching: true
   ServiceArgs:
-    workers: 1
+    workers: 4
     resources:
       gpu: 1
   common-configs: [model, block-size, max-model-len, router, kv-transfer-config]
@@ -48,7 +48,7 @@ VllmWorker:
 PrefillWorker:
   max-num-batched-tokens: 16384
   ServiceArgs:
-    workers: 1
+    workers: 4
     resources:
       gpu: 1
   common-configs: [model, block-size, max-model-len, kv-transfer-config]

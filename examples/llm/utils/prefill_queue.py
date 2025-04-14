@@ -54,3 +54,16 @@ class PrefillQueue(NATSQueue):
             return prefill_request
         else:
             return None
+
+    async def dequeue_prefill_requests(self, max_batch_size: int) -> Optional[list[RemotePrefillRequest]]:
+        requests = []
+        for _ in range(max_batch_size):
+            encoded_request = await self.dequeue_task()
+            if encoded_request is not None:
+                prefill_request = msgspec.json.decode(
+                    encoded_request, type=RemotePrefillRequest
+                )
+                requests.append(prefill_request)
+            else:
+                break
+        return requests if requests else None

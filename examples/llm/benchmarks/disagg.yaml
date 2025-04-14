@@ -17,45 +17,47 @@ Frontend:
   # This model was chosen for its 70B size and FP8 precision, which the TP and
   # DP configurations were tuned for its size, and its precision reduces model
   # and KV cache memory usage and easing remote cache transfer.
-  served_model_name: neuralmagic/DeepSeek-R1-Distill-Llama-70B-FP8-dynamic
+  served_model_name: Nitral-AI/Captain-Eris_Violet-V0.420-12B
   endpoint: dynamo.Processor.chat/completions
-  port: 8000
+  port: 8001
 
 Processor:
-  model: neuralmagic/DeepSeek-R1-Distill-Llama-70B-FP8-dynamic
+  model: Nitral-AI/Captain-Eris_Violet-V0.420-12B
   router: round-robin
 
 # x1 process with 4 GPUs generating output tokens (the "decode" phase).
 VllmWorker:
-  model: neuralmagic/DeepSeek-R1-Distill-Llama-70B-FP8-dynamic
+  model: Nitral-AI/Captain-Eris_Violet-V0.420-12B
   kv-transfer-config: '{"kv_connector":"DynamoNixlConnector"}'
   # Number of tokens in a batch for more efficient chunked transfers to GPUs.
   block-size: 128
-  max-model-len: 3500
+  max-model-len: 10000
   # Enable prefill at different workers.
   remote-prefill: true
   # Disable local prefill so only disaggregated prefill is used.
-  conditional-disagg: false
-  tensor-parallel-size: 4
-  gpu-memory-utilization: 0.95
+  conditional-disagg: true
+  max-local-prefill-length: 1
+  max-prefill-queue-size: 1000
+  tensor-parallel-size: 1
+  gpu-memory-utilization: 0.9
   disable-log-requests: true
   ServiceArgs:
-    workers: 1
+    workers: 2
     resources:
-      gpu: 4
+      gpu: 1
 
 # x4 processes each with 1 GPU handling the initial prefill (context embedding) phase.
 PrefillWorker:
-  model: neuralmagic/DeepSeek-R1-Distill-Llama-70B-FP8-dynamic
+  model: Nitral-AI/Captain-Eris_Violet-V0.420-12B
   kv-transfer-config: '{"kv_connector":"DynamoNixlConnector"}'
   block-size: 128
-  max-model-len: 3500
-  max-num-batched-tokens: 3500
+  max-model-len: 10000
+  max-num-batched-tokens: 10000
   tensor-parallel-size: 1
-  gpu-memory-utilization: 0.95
+  gpu-memory-utilization: 0.9
   disable-log-requests: true
   ServiceArgs:
-    workers: 4
+    workers: 2
     resources:
       gpu: 1
 

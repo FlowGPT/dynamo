@@ -19,6 +19,7 @@ import logging
 import os
 import signal
 import sys
+import time
 
 from pydantic import BaseModel
 from utils.nixl import NixlMetadataStore
@@ -124,8 +125,10 @@ class PrefillWorker:
             if self.engine_args.served_model_name is not None
             else "vllm"
         )
+        # set max batch size
+        batch_size = int(os.getenv("PREFILL_BATCH_SIZE", "5"))
         logger.info(
-            f"Prefill queue: {prefill_queue_nats_server}:{prefill_queue_stream_name}"
+            f"Prefill queue: {prefill_queue_nats_server}:{prefill_queue_stream_name}, batch_size: {batch_size}"
         )
         self.initialized = True
         # TODO: integrate prefill_queue to a dynamo endpoint
@@ -137,44 +140,53 @@ class PrefillWorker:
             while True:
                 # TODO: this might add a small overhead to pull prefill from nats
                 # need to test and check how much overhead it is
-                prefill_request = await prefill_queue.dequeue_prefill_request()
-                if prefill_request is not None:
+                start_time = time.time()
+                prefill_requests = await prefill_queue.dequeue_prefill_requests(
+                    max_batch_size=batch_size
+                )
+                if prefill_requests is not None:
+                    start_gen_time = time.time()
+                    print(f"Time taken to dequeue prefill {len(prefill_requests)} requests: {start_gen_time - start_time:.4f} seconds")
                     logger.info(
-                        f"Dequeued prefill request: {prefill_request.request_id}"
+                        f"Dequeued prefill request: {prefill_request.request_id}" for prefill_request in prefill_requests
                     )
-                    async for _ in self.generate(prefill_request):
+                    async for _ in self.generate(prefill_requests):
                         pass
+                    print(f"Time taken to process prefill {len(prefill_requests)} requests: {time.time() - start_gen_time:.4f} seconds")
 
-    async def generate(self, request: RemotePrefillRequest):
-        sampling_params = request.sampling_params
-        sampling_params.max_tokens = 1
-        sampling_params.min_tokens = 1
+    async def generate(self, requests: list[RemotePrefillRequest]):
+        for request in requests:
+            sampling_params = request.sampling_params
+            sampling_params.max_tokens = 1
+            sampling_params.min_tokens = 1
 
-        remote_prefill_params = RemotePrefillParams(
-            is_remote_decode=True,
-            decode_block_ids=request.block_ids,
-            decode_engine_id=request.engine_id,
-            decode_computed_block_ids=request.computed_block_ids,
-        )
-
-        # TODO check if metadata has changed
-        # and reload - currently only loading once
-        if request.engine_id not in self._loaded_metadata:
-            remote_metadata = await self._metadata_store.get(request.engine_id)
-            await self.engine_client.add_remote_nixl_metadata(remote_metadata)
-            logger.info(
-                f"Loaded nixl metadata from engine {request.engine_id} into "
-                f"engine {self.engine_client.nixl_metadata.engine_id}"
+            remote_prefill_params = RemotePrefillParams(
+                is_remote_decode=True,
+                decode_block_ids=request.block_ids,
+                decode_engine_id=request.engine_id,
+                decode_computed_block_ids=request.computed_block_ids,
             )
-            self._loaded_metadata.add(request.engine_id)
 
-        async for _ in self.engine_client.generate(
-            request_id=request.request_id,
-            prompt=TokensPrompt(prompt_token_ids=request.prompt_token_ids),
-            sampling_params=sampling_params,
-            remote_prefill_params=remote_prefill_params,
-        ):
-            yield
+            # TODO check if metadata has changed
+            # and reload - currently only loading once
+            if request.engine_id not in self._loaded_metadata:
+                remote_metadata = await self._metadata_store.get(request.engine_id)
+                start_time = time.time()
+                await self.engine_client.add_remote_nixl_metadata(remote_metadata)
+                print(f"Time taken to add_remote_nixl_metadata prefill request {request.request_id}: {time.time():.4f} seconds")
+                logger.info(
+                    f"Loaded nixl metadata from engine {request.engine_id} into "
+                    f"engine {self.engine_client.nixl_metadata.engine_id}"
+                )
+                self._loaded_metadata.add(request.engine_id)
+
+            async for _ in self.engine_client.generate(
+                request_id=request.request_id,
+                prompt=TokensPrompt(prompt_token_ids=request.prompt_token_ids),
+                sampling_params=sampling_params,
+                remote_prefill_params=remote_prefill_params,
+            ):
+                yield
 
     @dynamo_endpoint()
     async def mock(self, req: RequestType):
